@@ -1,12 +1,17 @@
 #include <Arduino.h>
-#include <AudioFileSourceSPIFFS.h>
-#include "AudioGeneratorMP3.h"
+#include <AudioFileSourceLittleFS.h>
+#include "AudioGeneratorWAV.h"
 #include "AudioOutputI2S.h"
 #include <I2S.h>
+#include <LittleFS.h>
 
-AudioGeneratorMP3 *mp3;
-AudioFileSourceSPIFFS *file;
+AudioGeneratorWAV *wav;
+AudioFileSourceLittleFS *file1;
+AudioFileSourceLittleFS *file2;
 AudioOutputI2S *out;
+
+void littleFsListDir(const char *dirname);
+
 void setup()
 {
   Serial.begin(9600);
@@ -21,31 +26,39 @@ void setup()
   }
   Serial.println("\nI2S Initialized");
   delay(500);
-  if (!SPIFFS.begin())
+  if (!LittleFS.begin())
   {
-    Serial.println("Failed to initialize SPIFFS");
+    Serial.println("Failed to initialize LittleFS");
   }
-  Serial.println("SPIFFS Initialized");
+  Serial.println("LittleFS Initialized");
+  littleFsListDir("/");
   delay(500);
-  file = new AudioFileSourceSPIFFS("/pulse_armed.mp3");
-  if (!file)
+  file1 = new AudioFileSourceLittleFS("/armed.wav");
+  file2 = new AudioFileSourceLittleFS("/pulse_armed.wav");
+  if (!file1)
   {
     Serial.println("Error while loading file");
   }
   out = new AudioOutputI2S();
-  mp3 = new AudioGeneratorMP3();
-  out->SetPinout(D6, D8, D7);
+  wav = new AudioGeneratorWAV();
   out->SetBitsPerSample(16);
   out->SetRate(44100);
-  mp3->begin(file, out);
+  wav->begin(file1, out);
 }
 
 void loop()
 {
-  if (mp3->isRunning()) {
-    if (!mp3->loop()) mp3->stop(); 
-  } else {
-    Serial.printf("MP3 done\n");
-    delay(1000);
+  wav->loop();
+}
+
+void littleFsListDir(const char *dirname) {
+  Serial.printf("Listing directory: %s\n", dirname);
+
+  Dir root = LittleFS.openDir(dirname);
+
+  while (root.next()) {
+    File file = root.openFile("r");
+    Serial.printf(" FILE: %s SIZE: %u\n", root.fileName().c_str(), file.size());
+    file.close();
   }
 }
