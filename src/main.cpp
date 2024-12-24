@@ -6,22 +6,44 @@
 #include <LittleFS.h>
 
 AudioGeneratorWAV *wav;
-AudioFileSourceLittleFS *file1;
-AudioFileSourceLittleFS *file2;
+AudioFileSourceLittleFS *file_armed;
+AudioFileSourceLittleFS *file_pulsearmed;
+AudioFileSourceLittleFS *file_activate;
+AudioFileSourceLittleFS *file_deactivate;
 AudioOutputI2S *out;
 
+#define TRIGGER D1
+#define ARMED_LED D5
+#define WARNING_LEFT_LED D6
+#define WARNING_MIDDLE_LED D7
+#define WARNING_RIGHT_LED D2
+
 void littleFsListDir(const char *dirname);
+void loop_warning_lights();
+void stop_all_lights();
+
+bool triggered = false;
+bool previousState = false;
+bool playingArmed = false;
+bool playingPulse = false;
 
 void setup()
 {
+  pinMode(ARMED_LED, OUTPUT);
+  pinMode(WARNING_LEFT_LED, OUTPUT);
+  pinMode(WARNING_MIDDLE_LED, OUTPUT);
+  pinMode(WARNING_RIGHT_LED, OUTPUT);
+  pinMode(TRIGGER, INPUT);
+
+  digitalWrite(WARNING_LEFT_LED, LOW);
+  digitalWrite(WARNING_MIDDLE_LED, LOW);
+  digitalWrite(WARNING_RIGHT_LED, LOW);
+  digitalWrite(ARMED_LED, LOW);
+
   Serial.begin(9600);
   delay(500);
   if (!I2S.begin(I2S_PHILIPS_MODE, 44100, 16))
   {
-
-// const int BUFFER_SIZE = 512;
-// int16_t audio_buffer[BUFFER_SIZE];
-
     while (1)
       ; // do nothing
   }
@@ -33,23 +55,83 @@ void setup()
   }
   Serial.println("LittleFS Initialized");
   littleFsListDir("/");
-  delay(500);
-  file1 = new AudioFileSourceLittleFS("/armed.wav");
-  file2 = new AudioFileSourceLittleFS("/pulse_armed.wav");
-  if (!file1)
-  {
-    Serial.println("Error while loading file");
-  }
+  file_armed = new AudioFileSourceLittleFS("/armed.wav");
+  file_pulsearmed = new AudioFileSourceLittleFS("/pulse_armed.wav");
   out = new AudioOutputI2S();
   wav = new AudioGeneratorWAV();
   out->SetBitsPerSample(16);
   out->SetRate(44100);
-  wav->begin(file1, out);
 }
 
 void loop()
 {
-  wav->loop();
+  static bool warning_lights = false;
+  bool currentState = digitalRead(TRIGGER);
+  Serial.println(currentState);
+
+  // Only play sounds when the state changes and no sound is currently playing
+  if (!wav->isRunning())
+  {
+    // State changed from LOW to HIGH
+    if (currentState == HIGH && previousState == LOW)
+    {
+      digitalWrite(ARMED_LED, HIGH);
+      warning_lights = true;
+      if (file_activate) file_activate->close();  // Close if exists
+      file_activate = new AudioFileSourceLittleFS("/activate.wav");
+      if (file_activate->isOpen()) {
+        wav->begin(file_activate, out);
+        triggered = true;
+      } else {
+        Serial.println("Failed to open activate.wav");
+      }
+    }
+    // State changed from HIGH to LOW
+    else if ((currentState == LOW && previousState == HIGH ) || (currentState == LOW && previousState == HIGH && triggered))
+    {
+      if (file_deactivate) file_deactivate->close();  // Close if exists
+      file_deactivate = new AudioFileSourceLittleFS("/deactivate.wav");
+      if (file_deactivate->isOpen()) {
+        wav->begin(file_deactivate, out);
+        triggered = false;
+      } else {
+        Serial.println("Failed to open deactivate.wav");
+      }
+    }
+    // If triggered and no sound playing, play armed.wav in loop
+    else if (triggered) {
+      if (file_armed) file_armed->close();
+      file_armed = new AudioFileSourceLittleFS("/armed.wav");
+      if (file_armed->isOpen()) {
+        wav->begin(file_armed, out);
+        triggered = true;
+      }
+    }
+  } else if (currentState == LOW && previousState == HIGH && triggered)
+  {
+    stop_all_lights();
+      if (file_deactivate) file_deactivate->close();  // Close if exists
+      file_deactivate = new AudioFileSourceLittleFS("/deactivate.wav");
+      if (file_deactivate->isOpen()) {
+        wav->begin(file_deactivate, out);
+        triggered = false;
+      } else {
+        Serial.println("Failed to open deactivate.wav");
+      }
+  }
+  
+  if (warning_lights)
+  {
+    loop_warning_lights();
+  }
+  
+
+  previousState = currentState;
+  if (wav->isRunning()) {
+    if (!wav->loop()) {
+      wav->stop();
+    }
+  }
 }
 
 void littleFsListDir(const char *dirname) {
@@ -64,67 +146,21 @@ void littleFsListDir(const char *dirname) {
   }
 }
 
-// void setup(){
-//     Serial.begin(9600);
-//     delay(1000);
-//     i2s_begin();
-//     i2s_set_rate(SAMPLE_RATE);
+void loop_warning_lights(){
+  digitalWrite(WARNING_LEFT_LED, HIGH);
+  delay(500);
+  digitalWrite(WARNING_LEFT_LED, LOW);
+  digitalWrite(WARNING_MIDDLE_LED, HIGH);
+  delay(500);
+  digitalWrite(WARNING_MIDDLE_LED, LOW);
+  digitalWrite(WARNING_RIGHT_LED, HIGH);
+  delay(500);
+  digitalWrite(WARNING_RIGHT_LED, LOW);
+}
 
-//     float delta_phase = 2 * PI * frequency/SAMPLE_RATE;
-//     float phase = 0.0;
-
-//     for (int i = 0; i < BUFFER_SIZE; i++)
-//     {
-//         uint32_t sample = (int16_t)(AMPLITUDE * sin(phase)) & 0xffff;
-//         sample = sample | (sample << 16);
-//         audio_buffer[i] = sample;
-//         phase += delta_phase;
-//         if (phase >= 2*PI)
-//         {
-//             phase -= 2*PI;
-//         }
-        
-//     }
-//     Serial.println("I2S initialized");
-// }
-
-// void loop(){
-//     for (int i = 0; i < BUFFER_SIZE; i++)
-//     {
-//         Serial.print(">sine:");
-//         Serial.println(audio_buffer[i]);
-//         i2s_write_sample(audio_buffer[i]);
-//     }
-// }
-
-
-// int count = 0;
-
-
-// void setup() 
-// {
-//   Serial.begin(9600);
-//   if (!I2S.begin(I2S_PHILIPS_MODE, I2S_SAMPLE_RATE, I2S_SAMPLE_BITS))
-//   {
-
-//     Serial.println("Failed to initialize I2S!");
-
-//     while (1)
-//       ; // do nothing
-//   }
-// }
-// int16_t GenerateSineWave()
-// {
-//     double rad = 2 * M_PI * 1000 * count++ / I2S_SAMPLE_RATE;
-//     int16_t sineVal = 32767 * sin(rad);
-//     return sineVal;
-// }
-// void loop()
-// {
-//     int16_t sine_wave = GenerateSineWave();
-//     I2S.write(sine_wave);
-//     I2S.write(sine_wave);
-//     Serial.print(">sine:");
-//     Serial.print(sine_wave);
-//     Serial.print("\n");
-// }
+void stop_all_lights(){
+  digitalWrite(WARNING_LEFT_LED, HIGH);
+  digitalWrite(WARNING_MIDDLE_LED, LOW);
+  digitalWrite(WARNING_RIGHT_LED, HIGH);
+  digitalWrite(ARMED_LED, LOW);
+}
